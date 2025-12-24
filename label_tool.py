@@ -8,7 +8,7 @@ import copy
 import glob
 import re
 
-TARGET_OUTPUT_DIR = r"./A7_Final_Output" 
+TARGET_OUTPUT_DIR = r"" 
 
 # --- Shared Logic ---
 
