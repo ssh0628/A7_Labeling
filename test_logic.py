@@ -2,7 +2,9 @@ import json
 import os
 import copy
 import re
-
+"""
+    진짜 말 그대로 테스트용 코드입니다.
+"""
 def clamp_coordinates(x, y, img_w, img_h, box_w=224, box_h=224):
     """
     Ensure the box defined by top-left (x, y) stays within image bounds.

@@ -10,13 +10,12 @@ import re
 
 # 1. TARGET_OUTPUT_DIR: 정상적으로 라벨링(A7)된 결과물이 저장될 폴더
 # 2. AMBIGUOUS_DIR: 'Next(애매함)' 버튼 클릭 시 원본 이미지가 격리될 폴더
-TARGET_OUTPUT_DIR = r"./" 
-AMBIGUOUS_DIR = r"./"
+TARGET_OUTPUT_DIR = None
+AMBIGUOUS_DIR = None
 
 # [STYLE CONFIGURATION]
 BOX_COLOR = "#27b73c" # 건들지 마세요
-BOX_WIDTH = 2
-
+BOX_WIDTH = 2 # 건들지 마세요
 
 # --- Shared Logic ---
 
@@ -132,13 +131,15 @@ class LabelTool:
         self.box_h = 224
         self.rect_id = None
         
-        # Initialize Directories
+        # Ensure Dirs (Only if paths are set)
         self.ensure_dirs()
         
         # UI Setup
         self.setup_ui()
         
     def ensure_dirs(self):
+        # If paths are empty strings, do not try to create them yet.
+        # User might set them before running or we warn at runtime.
         for d in [self.target_dir, self.ambiguous_dir]:
             if d and not os.path.exists(d):
                 try:
@@ -156,12 +157,14 @@ class LabelTool:
         btn_frame = tk.Frame(top_frame)
         btn_frame.pack(side=tk.LEFT)
         
-        self.btn_open = tk.Button(btn_frame, text="1. 폴더 열기 (Open)", command=self.open_directory, height=2, width=15)
+        self.btn_open = tk.Button(btn_frame, text="1. 폴더 열기", command=self.open_directory, height=2, width=15)
         self.btn_open.pack(side=tk.LEFT, padx=5)
         
-        # Ambiguous / Skip Button
+        self.btn_back = tk.Button(btn_frame, text="< Back (수정/Undo)", command=self.on_back_click, height=2, width=15, bg="#eeeeee")
+        self.btn_back.pack(side=tk.LEFT, padx=5)
+        
         self.btn_next = tk.Button(btn_frame, text="2. Next (애매함/Skip)", command=self.on_ambiguous_click, height=2, width=20, bg="#ffdddd")
-        self.btn_next.pack(side=tk.LEFT, padx=20)
+        self.btn_next.pack(side=tk.LEFT, padx=5)
         
         # Status Label
         self.lbl_status = tk.Label(top_frame, text="폴더를 선택해주세요.", font=("Arial", 12))
@@ -194,6 +197,9 @@ class LabelTool:
         directory = filedialog.askdirectory()
         if directory:
             self.base_dir = directory
+            
+            if not self.target_dir or not self.ambiguous_dir:
+                messagebox.showwarning("Warning", "코드 상단의 TARGET_OUTPUT_DIR 및 AMBIGUOUS_DIR 변수가 비어있을 수 있습니다.\n경로를 확인해주세요.")
             
             # Recursive Search
             search_pattern = os.path.join(directory, "**", "*.jpg")
@@ -276,6 +282,55 @@ class LabelTool:
         
         # Ambiguous Process: Just Copy
         self.process_image_ambiguous()
+        
+    def on_back_click(self):
+        # Back Logic
+        if self.current_index <= 0:
+            messagebox.showinfo("First Image", "첫 번째 이미지입니다.")
+            return
+            
+        # 1. Decrement Index to go to "previous" image (which is the one we want to undo)
+        self.current_index -= 1
+        
+        # 2. Cleanup output for this image
+        prev_img_path = self.image_list[self.current_index]
+        basename = os.path.basename(prev_img_path)
+        base_name_no_ext = os.path.splitext(basename)[0]
+        
+        # Calculate potential output paths to delete
+        
+        # A. Labeled Paths (TARGET_OUTPUT_DIR)
+        new_base = re.sub(r'A[1-6]', 'A7', base_name_no_ext)
+        if new_base == base_name_no_ext and "A7" not in new_base:
+            new_base += "_A7"
+            
+        target_jpg = os.path.join(self.target_dir, new_base + ".jpg")
+        target_json = os.path.join(self.target_dir, new_base + ".json")
+        
+        # B. Ambiguous Path (AMBIGUOUS_DIR)
+        amb_jpg = os.path.join(self.ambiguous_dir, basename)
+        
+        deleted_msg = []
+        
+        # Try Delete
+        try:
+            if os.path.exists(target_jpg):
+                os.remove(target_jpg)
+                deleted_msg.append("Labeled JPG")
+            if os.path.exists(target_json):
+                os.remove(target_json)
+                deleted_msg.append("Labeled JSON")
+            if os.path.exists(amb_jpg):
+                os.remove(amb_jpg)
+                deleted_msg.append("Ambiguous JPG")
+                
+            print(f"Undo (Deleted): {', '.join(deleted_msg)} for {basename}")
+            
+        except Exception as e:
+            print(f"Undo Error (Delete failed): {e}")
+            
+        # 3. Load the image again
+        self.load_image()
 
     def process_image_labeled(self, x, y):
         current_img_path = self.image_list[self.current_index]
@@ -285,9 +340,7 @@ class LabelTool:
         
         if not os.path.exists(json_path):
             messagebox.showerror("Error", f"JSON not found: {json_path}")
-            return # Don't advance if error, let user decide or skip manually?
-            # Actually, per logic, maybe we should skip. 
-            # But let's error to alert user.
+            return # Block progress
             
         try:
             # 1. Read & Transform
@@ -305,6 +358,10 @@ class LabelTool:
             new_json_name = new_base + ".json"
             
             # 3. Save to TARGET_OUTPUT_DIR
+            if not self.target_dir:
+                messagebox.showerror("Error", "TARGET_OUTPUT_DIR is not set!")
+                return
+
             out_img = os.path.join(self.target_dir, new_img_name)
             out_json = os.path.join(self.target_dir, new_json_name)
             
@@ -327,6 +384,10 @@ class LabelTool:
         basename = os.path.basename(current_img_path)
         
         try:
+            if not self.ambiguous_dir:
+                messagebox.showerror("Error", "AMBIGUOUS_DIR is not set!")
+                return
+
             # Just copy image to AMBIGUOUS_DIR
             out_img = os.path.join(self.ambiguous_dir, basename)
             shutil.copy2(current_img_path, out_img)
