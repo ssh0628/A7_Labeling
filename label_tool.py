@@ -192,6 +192,52 @@ class LabelTool:
         # Events
         self.canvas.bind("<Motion>", self.on_mouse_move)
         self.canvas.bind("<Button-1>", self.on_click_canvas)
+
+        # --- Mouse Wheel Scrolling ---
+        # Windows/MacOS
+        self.root.bind("<MouseWheel>", self._on_mousewheel)
+        self.root.bind("<Shift-MouseWheel>", self._on_shift_mousewheel)
+
+        # Linux (Button-4/5)
+        self.root.bind("<Button-4>", self._on_mousewheel)
+        self.root.bind("<Button-5>", self._on_mousewheel)
+        self.root.bind("<Shift-Button-4>", self._on_shift_mousewheel)
+        self.root.bind("<Shift-Button-5>", self._on_shift_mousewheel)
+
+    def _on_mousewheel(self, event):
+        """Vertical scroll logic"""
+        # Linux (Button-4: Up, Button-5: Down)
+        if event.num == 4:
+            self.canvas.yview_scroll(-1, "units")
+            return
+        if event.num == 5:
+            self.canvas.yview_scroll(1, "units")
+            return
+
+        # Windows/MacOS (event.delta)
+        if event.delta:
+            # Scroll direction depends on delta sign
+            if event.delta > 0:
+                self.canvas.yview_scroll(-1, "units") # Scroll up
+            else:
+                self.canvas.yview_scroll(1, "units")  # Scroll down
+
+    def _on_shift_mousewheel(self, event):
+        """Horizontal scroll logic (Shift + Wheel)"""
+        # Linux
+        if event.num == 4:
+            self.canvas.xview_scroll(-1, "units")
+            return
+        if event.num == 5:
+            self.canvas.xview_scroll(1, "units")
+            return
+
+        # Windows/MacOS
+        if event.delta:
+            if event.delta > 0:
+                self.canvas.xview_scroll(-1, "units") # Scroll left
+            else:
+                self.canvas.xview_scroll(1, "units")  # Scroll right
         
     def open_directory(self):
         directory = filedialog.askdirectory()
