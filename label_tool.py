@@ -8,6 +8,8 @@ import copy
 import glob
 import re
 
+TARGET_OUTPUT_DIR = r"./A7_Final_Output" 
+
 # --- Shared Logic ---
 
 def clamp_coordinates(x, y, img_w, img_h, box_w=224, box_h=224):
@@ -113,23 +115,34 @@ def transform_json_data(original_data, top_left_x, top_left_y, box_w=224, box_h=
 class LabelTool:
     def __init__(self, root):
         self.root = root
-        self.root.title("Data Labeling Tool - A1~A6 to A7 Converter")
+        self.root.title("Data Labeling Tool - Recursive & Custom Output")
         self.root.geometry("1400x900")
         
         # State
         self.image_list = []
         self.current_index = 0
         self.base_dir = ""
-        self.output_dir = ""
+        self.output_dir = TARGET_OUTPUT_DIR
         self.tk_image = None
         self.raw_pil_image = None # Keep reference for dimensions
         self.box_w = 224
         self.box_h = 224
         self.rect_id = None
         
+        # Determine Output Dir
+        self.ensure_output_dir()
+        
         # UI Setup
         self.setup_ui()
         
+    def ensure_output_dir(self):
+        if not os.path.exists(self.output_dir):
+            try:
+                os.makedirs(self.output_dir)
+                print(f"Created output directory: {self.output_dir}")
+            except Exception as e:
+                messagebox.showerror("Config Error", f"Could not create output dir: {self.output_dir}\nError: {e}")
+                
     def setup_ui(self):
         # Top Frame
         top_frame = tk.Frame(self.root, height=50)
@@ -138,7 +151,7 @@ class LabelTool:
         self.btn_open = tk.Button(top_frame, text="폴더 열기 (Open Folder)", command=self.open_directory)
         self.btn_open.pack(side=tk.LEFT)
         
-        self.lbl_status = tk.Label(top_frame, text="폴더를 선택해주세요.")
+        self.lbl_status = tk.Label(top_frame, text=f"저장 경로: {self.output_dir} | 폴더를 선택해주세요.")
         self.lbl_status.pack(side=tk.LEFT, padx=10)
         
         # Canvas Frame
@@ -168,19 +181,19 @@ class LabelTool:
         directory = filedialog.askdirectory()
         if directory:
             self.base_dir = directory
+            
+            # RECURSIVE SEARCH
+            # glob search for **/*.jpg with recursive=True
+            search_pattern = os.path.join(directory, "**", "*.jpg")
+            all_jpgs = glob.glob(search_pattern, recursive=True)
+            all_jpgs = sorted(all_jpgs)
+            
             # Filter: Check if filename contains A1~A6
-            # Pattern: .*A[1-6].*\.jpg
-            all_jpgs = sorted(glob.glob(os.path.join(directory, "*.jpg")))
             self.image_list = [f for f in all_jpgs if re.search(r'A[1-6]', os.path.basename(f))]
             
             if not self.image_list:
-                messagebox.showerror("Error", "No proper image files (A1~A6) found in directory.")
+                messagebox.showerror("Error", f"No proper image files (A1~A6) found in: {directory} (Recursive)")
                 return
-            
-            # Create Output Directory
-            self.output_dir = os.path.join(self.base_dir, "A7_Converted")
-            if not os.path.exists(self.output_dir):
-                os.makedirs(self.output_dir)
             
             self.current_index = 0
             self.load_image()
@@ -191,11 +204,11 @@ class LabelTool:
             self.tk_image = None
             self.canvas.delete("all")
             messagebox.showinfo("Done", "모든 이미지가 처리되었습니다! (All images processed)")
-            self.lbl_status.config(text="완료 - 추가 작업이 필요하면 폴더를 다시 여세요.")
+            self.lbl_status.config(text=f"완료 - 결과는 {self.output_dir} 확인")
             return
             
         img_path = self.image_list[self.current_index]
-        self.lbl_status.config(text=f"[{self.current_index+1}/{len(self.image_list)}] {os.path.basename(img_path)}")
+        self.lbl_status.config(text=f"[{self.current_index+1}/{len(self.image_list)}] {os.path.basename(img_path)} -> {self.output_dir}")
         
         try:
             pil_img = Image.open(img_path)
@@ -253,7 +266,7 @@ class LabelTool:
         current_img_path = self.image_list[self.current_index]
         basename = os.path.basename(current_img_path)
         base_name_no_ext = os.path.splitext(basename)[0]
-        json_path = os.path.join(self.base_dir, base_name_no_ext + ".json")
+        json_path = os.path.join(os.path.dirname(current_img_path), base_name_no_ext + ".json")
         
         if not os.path.exists(json_path):
             messagebox.showerror("Skip", f"JSON not found: {json_path}\nSkipping this image.")
@@ -278,6 +291,7 @@ class LabelTool:
             new_img_name = new_basename_no_ext + ".jpg"
             new_json_name = new_basename_no_ext + ".json"
             
+            # SAVE TO GLOBALLY CONFIGURED OUTPUT DIR
             new_img_path = os.path.join(self.output_dir, new_img_name)
             new_json_path = os.path.join(self.output_dir, new_json_name)
             
