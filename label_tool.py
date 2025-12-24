@@ -8,7 +8,15 @@ import copy
 import glob
 import re
 
-TARGET_OUTPUT_DIR = r"" 
+# 1. TARGET_OUTPUT_DIR: 정상적으로 라벨링(A7)된 결과물이 저장될 폴더
+# 2. AMBIGUOUS_DIR: 'Next(애매함)' 버튼 클릭 시 원본 이미지가 격리될 폴더
+TARGET_OUTPUT_DIR = r"./" 
+AMBIGUOUS_DIR = r"./"
+
+# [STYLE CONFIGURATION]
+BOX_COLOR = "#27b73c" # 건들지 마세요
+BOX_WIDTH = 2
+
 
 # --- Shared Logic ---
 
@@ -16,13 +24,11 @@ def clamp_coordinates(x, y, img_w, img_h, box_w=224, box_h=224):
     """
     Ensure the box defined by top-left (x, y) stays within image bounds.
     """
-    # Clamp x
     if img_w < box_w:
         final_x = 0
     else:
         final_x = max(0, min(x, img_w - box_w))
         
-    # Clamp y
     if img_h < box_h:
         final_y = 0
     else:
@@ -33,23 +39,20 @@ def clamp_coordinates(x, y, img_w, img_h, box_w=224, box_h=224):
 def transform_json_data(original_data, top_left_x, top_left_y, box_w=224, box_h=224):
     new_data = copy.deepcopy(original_data)
     
-    # 2.A. Text Substitution Helper
+    # Text Substitution Helper
     def replace_text_strict_path(text):
         if not isinstance(text, str): return text
-        # 1. Replace '유증상' -> '무증상'
         text = text.replace("유증상", "무증상")
-        # 2. Path Regex: A1~A6 followed by underscore and anything not a slash -> A7_정상
-        # This covers directory names like "A2_비듬_각질" => "A7_정상"
+        # Regex: A[1-6]_[^/]+ -> A7_정상
         text = re.sub(r'A[1-6]_[^/]+', 'A7_정상', text)
         return text
         
     def replace_text_filename(text):
         if not isinstance(text, str): return text
-        # Filename only needs A# -> A7
         text = re.sub(r'A[1-6]', 'A7', text)
         return text
 
-    # 2.B. Metadata Transformation
+    # Metadata Transformation
     meta = new_data.get("metaData", {})
     
     if "Raw data ID" in meta:
@@ -57,14 +60,14 @@ def transform_json_data(original_data, top_left_x, top_left_y, box_w=224, box_h=
         
     meta["lesions"] = "A7"
     meta["Path"] = "무증상"
-    meta["diagnosis"] = "정상" # Strict Rule: Overwrite
+    meta["diagnosis"] = "정상" # Strict Rule
     
     if "src_path" in meta:
         meta["src_path"] = replace_text_strict_path(meta["src_path"])
     if "label_path" in meta:
         meta["label_path"] = replace_text_strict_path(meta["label_path"])
         
-    # 2.C. Labeling Info - Strict Rules
+    # Labeling Info
     x1 = int(top_left_x)
     y1 = int(top_left_y)
     x2 = x1 + box_w
@@ -76,10 +79,9 @@ def transform_json_data(original_data, top_left_x, top_left_y, box_w=224, box_h=
     x5 = x1
     y5 = y1
     
-    # Polygon Structure: List with ONE dictionary
     polygon_item = {
         "polygon": {
-            "color": "#27b73c",
+            "color": BOX_COLOR,
             "location": [
                 {
                     "x1": x1, "y1": y1,
@@ -96,7 +98,7 @@ def transform_json_data(original_data, top_left_x, top_left_y, box_w=224, box_h=
     
     box_item = {
         "box": {
-            "color": "#27b73c",
+            "color": BOX_COLOR,
             "location": [
                 {"x": x1, "y": y1, "width": box_w, "height": box_h}
             ],
@@ -115,43 +117,54 @@ def transform_json_data(original_data, top_left_x, top_left_y, box_w=224, box_h=
 class LabelTool:
     def __init__(self, root):
         self.root = root
-        self.root.title("Data Labeling Tool - Recursive & Custom Output")
+        self.root.title("Data Labeling Tool - A7 Converter & Ambiguous Filter")
         self.root.geometry("1400x900")
         
         # State
         self.image_list = []
         self.current_index = 0
         self.base_dir = ""
-        self.output_dir = TARGET_OUTPUT_DIR
+        self.target_dir = TARGET_OUTPUT_DIR
+        self.ambiguous_dir = AMBIGUOUS_DIR
         self.tk_image = None
-        self.raw_pil_image = None # Keep reference for dimensions
+        self.raw_pil_image = None
         self.box_w = 224
         self.box_h = 224
         self.rect_id = None
         
-        # Determine Output Dir
-        self.ensure_output_dir()
+        # Initialize Directories
+        self.ensure_dirs()
         
         # UI Setup
         self.setup_ui()
         
-    def ensure_output_dir(self):
-        if not os.path.exists(self.output_dir):
-            try:
-                os.makedirs(self.output_dir)
-                print(f"Created output directory: {self.output_dir}")
-            except Exception as e:
-                messagebox.showerror("Config Error", f"Could not create output dir: {self.output_dir}\nError: {e}")
-                
+    def ensure_dirs(self):
+        for d in [self.target_dir, self.ambiguous_dir]:
+            if d and not os.path.exists(d):
+                try:
+                    os.makedirs(d)
+                    print(f"Created dir: {d}")
+                except Exception as e:
+                    messagebox.showerror("Config Error", f"Failed to create dir: {d}\n{e}")
+
     def setup_ui(self):
         # Top Frame
         top_frame = tk.Frame(self.root, height=50)
-        top_frame.pack(side=tk.TOP, fill=tk.X, padx=5, pady=5)
+        top_frame.pack(side=tk.TOP, fill=tk.X, padx=10, pady=10)
         
-        self.btn_open = tk.Button(top_frame, text="폴더 열기 (Open Folder)", command=self.open_directory)
-        self.btn_open.pack(side=tk.LEFT)
+        # Left Side Buttons
+        btn_frame = tk.Frame(top_frame)
+        btn_frame.pack(side=tk.LEFT)
         
-        self.lbl_status = tk.Label(top_frame, text=f"저장 경로: {self.output_dir} | 폴더를 선택해주세요.")
+        self.btn_open = tk.Button(btn_frame, text="1. 폴더 열기 (Open)", command=self.open_directory, height=2, width=15)
+        self.btn_open.pack(side=tk.LEFT, padx=5)
+        
+        # Ambiguous / Skip Button
+        self.btn_next = tk.Button(btn_frame, text="2. Next (애매함/Skip)", command=self.on_ambiguous_click, height=2, width=20, bg="#ffdddd")
+        self.btn_next.pack(side=tk.LEFT, padx=20)
+        
+        # Status Label
+        self.lbl_status = tk.Label(top_frame, text="폴더를 선택해주세요.", font=("Arial", 12))
         self.lbl_status.pack(side=tk.LEFT, padx=10)
         
         # Canvas Frame
@@ -175,40 +188,39 @@ class LabelTool:
         
         # Events
         self.canvas.bind("<Motion>", self.on_mouse_move)
-        self.canvas.bind("<Button-1>", self.on_click)
+        self.canvas.bind("<Button-1>", self.on_click_canvas)
         
     def open_directory(self):
         directory = filedialog.askdirectory()
         if directory:
             self.base_dir = directory
             
-            # RECURSIVE SEARCH
-            # glob search for **/*.jpg with recursive=True
+            # Recursive Search
             search_pattern = os.path.join(directory, "**", "*.jpg")
             all_jpgs = glob.glob(search_pattern, recursive=True)
             all_jpgs = sorted(all_jpgs)
             
-            # Filter: Check if filename contains A1~A6
+            # Filter: filenames containing A1~A6
             self.image_list = [f for f in all_jpgs if re.search(r'A[1-6]', os.path.basename(f))]
             
             if not self.image_list:
-                messagebox.showerror("Error", f"No proper image files (A1~A6) found in: {directory} (Recursive)")
+                messagebox.showerror("Error", f"No proper image files (A1~A6) found in: {directory}")
                 return
             
             self.current_index = 0
             self.load_image()
             
     def load_image(self):
-        # Fix 1: IndexError Prevention
+        # Guard: End of list
         if self.current_index >= len(self.image_list):
             self.tk_image = None
             self.canvas.delete("all")
-            messagebox.showinfo("Done", "모든 이미지가 처리되었습니다! (All images processed)")
-            self.lbl_status.config(text=f"완료 - 결과는 {self.output_dir} 확인")
+            messagebox.showinfo("Done", "모든 이미지가 처리되었습니다!")
+            self.lbl_status.config(text="완료")
             return
             
         img_path = self.image_list[self.current_index]
-        self.lbl_status.config(text=f"[{self.current_index+1}/{len(self.image_list)}] {os.path.basename(img_path)} -> {self.output_dir}")
+        self.lbl_status.config(text=f"[{self.current_index+1}/{len(self.image_list)}] {os.path.basename(img_path)}")
         
         try:
             pil_img = Image.open(img_path)
@@ -219,8 +231,8 @@ class LabelTool:
             self.canvas.config(scrollregion=(0, 0, pil_img.width, pil_img.height))
             self.canvas.create_image(0, 0, image=self.tk_image, anchor=tk.NW)
             
-            # Initial Cursor Box (Hidden or at 0,0)
-            self.rect_id = self.canvas.create_rectangle(0, 0, 0, 0, outline="#27b73c", width=2)
+            # Cursor Box
+            self.rect_id = self.canvas.create_rectangle(0, 0, 0, 0, outline=BOX_COLOR, width=BOX_WIDTH)
             
         except Exception as e:
             messagebox.showerror("Error", f"Failed to load image: {e}")
@@ -228,88 +240,105 @@ class LabelTool:
     def get_clamped_box_coords(self, mouse_x, mouse_y):
         if not self.raw_pil_image: return 0, 0
         
-        # To make the mouse be at the center of the box:
-        # TopLeft = Mouse - Box/2
+        # Center the box on mouse
         tl_x = mouse_x - (self.box_w // 2)
         tl_y = mouse_y - (self.box_h // 2)
         
-        # Clamp Logic
         final_x, final_y = clamp_coordinates(tl_x, tl_y, self.raw_pil_image.width, self.raw_pil_image.height)
         return final_x, final_y
 
     def on_mouse_move(self, event):
         if not self.tk_image: return
         
-        # Canvas Scroll Offset
         canvas_x = self.canvas.canvasx(event.x)
         canvas_y = self.canvas.canvasy(event.y)
         
         lx, ly = self.get_clamped_box_coords(canvas_x, canvas_y)
-        
         self.canvas.coords(self.rect_id, lx, ly, lx + self.box_w, ly + self.box_h)
         
-    def on_click(self, event):
-        # Fix 2: Safety guard
+    def on_click_canvas(self, event):
+        # Guard
         if not self.tk_image: return
+        if self.current_index >= len(self.image_list): return
         
         canvas_x = self.canvas.canvasx(event.x)
         canvas_y = self.canvas.canvasy(event.y)
         
         final_x, final_y = self.get_clamped_box_coords(canvas_x, canvas_y)
-        self.process_current_image(final_x, final_y)
         
-    def process_current_image(self, x, y):
-        # Fix 3: IndexError Prevention Guard
-        if self.current_index >= len(self.image_list):
-            return
+        # Regular Process: Label and Save
+        self.process_image_labeled(final_x, final_y)
+        
+    def on_ambiguous_click(self):
+        # Guard
+        if not self.tk_image: return
+        if self.current_index >= len(self.image_list): return
+        
+        # Ambiguous Process: Just Copy
+        self.process_image_ambiguous()
 
+    def process_image_labeled(self, x, y):
         current_img_path = self.image_list[self.current_index]
         basename = os.path.basename(current_img_path)
         base_name_no_ext = os.path.splitext(basename)[0]
         json_path = os.path.join(os.path.dirname(current_img_path), base_name_no_ext + ".json")
         
         if not os.path.exists(json_path):
-            messagebox.showerror("Skip", f"JSON not found: {json_path}\nSkipping this image.")
-            self.current_index += 1
-            self.load_image()
-            return
+            messagebox.showerror("Error", f"JSON not found: {json_path}")
+            return # Don't advance if error, let user decide or skip manually?
+            # Actually, per logic, maybe we should skip. 
+            # But let's error to alert user.
             
         try:
-            # 1. Read JSON
+            # 1. Read & Transform
             with open(json_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-                
-            # 2. Transform Data (Uses new Regex Logic)
+            
             new_data = transform_json_data(data, x, y, self.box_w, self.box_h)
             
-            # 3. Determine New Filenames (Regex: A1~A6 -> A7)
-            new_basename_no_ext = re.sub(r'A[1-6]', 'A7', base_name_no_ext)
-            if new_basename_no_ext == base_name_no_ext and "A7" not in new_basename_no_ext:
-                 # Safety fallback
-                 new_basename_no_ext += "_A7"
+            # 2. Filename Generation
+            new_base = re.sub(r'A[1-6]', 'A7', base_name_no_ext)
+            if new_base == base_name_no_ext and "A7" not in new_base:
+                new_base += "_A7"
+                
+            new_img_name = new_base + ".jpg"
+            new_json_name = new_base + ".json"
             
-            new_img_name = new_basename_no_ext + ".jpg"
-            new_json_name = new_basename_no_ext + ".json"
+            # 3. Save to TARGET_OUTPUT_DIR
+            out_img = os.path.join(self.target_dir, new_img_name)
+            out_json = os.path.join(self.target_dir, new_json_name)
             
-            # SAVE TO GLOBALLY CONFIGURED OUTPUT DIR
-            new_img_path = os.path.join(self.output_dir, new_img_name)
-            new_json_path = os.path.join(self.output_dir, new_json_name)
+            with open(out_json, 'w', encoding='utf-8') as f:
+                json.dump(new_data, f, ensure_ascii=False, indent=2)
+                
+            shutil.copy2(current_img_path, out_img)
             
-            # 4. Save JSON
-            with open(new_json_path, 'w', encoding='utf-8') as f:
-                json.dump(new_data, f, ensure_ascii=False, indent=2) 
+            print(f"Labeled: {basename} -> {out_img}")
             
-            # 5. Copy Image
-            shutil.copy2(current_img_path, new_img_path)
-            
-            print(f"Processed: {basename} -> {new_img_name}")
-            
-            # 6. Next
+            # 4. Next
             self.current_index += 1
             self.load_image()
             
         except Exception as e:
-            messagebox.showerror("Error", f"Processing failed: {e}")
+            messagebox.showerror("Error", f"Labeling failed: {e}")
+
+    def process_image_ambiguous(self):
+        current_img_path = self.image_list[self.current_index]
+        basename = os.path.basename(current_img_path)
+        
+        try:
+            # Just copy image to AMBIGUOUS_DIR
+            out_img = os.path.join(self.ambiguous_dir, basename)
+            shutil.copy2(current_img_path, out_img)
+            
+            print(f"Ambiguous (Skipped): {basename} -> {out_img}")
+            
+            # Next
+            self.current_index += 1
+            self.load_image()
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Ambiguous data move failed: {e}")
 
 if __name__ == "__main__":
     root = tk.Tk()
