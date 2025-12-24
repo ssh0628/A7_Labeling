@@ -239,6 +239,30 @@ class LabelTool:
             else:
                 self.canvas.xview_scroll(1, "units")  # Scroll right
         
+    def save_progress(self):
+        """
+        Auto-save current index to progress.json in TARGET_OUTPUT_DIR.
+        """
+        if not self.target_dir or not os.path.exists(self.target_dir):
+            return
+            
+        last_file = ""
+        if 0 <= self.current_index < len(self.image_list):
+            last_file = os.path.basename(self.image_list[self.current_index])
+            
+        data = {
+            "last_index": self.current_index,
+            "last_file": last_file
+        }
+        
+        json_path = os.path.join(self.target_dir, "progress.json")
+        try:
+            with open(json_path, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2)
+            # print(f"Auto-saved: {data}")
+        except Exception as e:
+            print(f"Failed to auto-save progress: {e}")
+
     def open_directory(self):
         directory = filedialog.askdirectory()
         if directory:
@@ -259,8 +283,29 @@ class LabelTool:
                 messagebox.showerror("Error", f"No proper image files (A1~A6) found in: {directory}")
                 return
             
+            # --- Resume Logic ---
             self.current_index = 0
+            
+            if self.target_dir:
+                progress_path = os.path.join(self.target_dir, "progress.json")
+                if os.path.exists(progress_path):
+                    try:
+                        with open(progress_path, 'r', encoding='utf-8') as f:
+                            data = json.load(f)
+                            last_idx = data.get("last_index", 0)
+                            
+                        # Confirm Resume
+                        if messagebox.askyesno("Resume", f"이전 작업 기록({last_idx}번째)이 있습니다.\n이어서 하시겠습니까?"):
+                            if 0 <= last_idx < len(self.image_list):
+                                self.current_index = last_idx
+                            else:
+                                messagebox.showwarning("Warning", "저장된 인덱스가 범위를 벗어났습니다. 처음부터 시작합니다.")
+                                self.current_index = 0
+                    except Exception as e:
+                        print(f"Failed to load progress: {e}")
+            
             self.load_image()
+            self.save_progress() # Save initial state (0 or resumed)
             
     def load_image(self):
         # Guard: End of list
@@ -375,7 +420,8 @@ class LabelTool:
         except Exception as e:
             print(f"Undo Error (Delete failed): {e}")
             
-        # 3. Load the image again
+        # 3. Load the image again + Auto Save
+        self.save_progress() # Save the decremented index
         self.load_image()
 
     def process_image_labeled(self, x, y):
@@ -418,8 +464,9 @@ class LabelTool:
             
             print(f"Labeled: {basename} -> {out_img}")
             
-            # 4. Next
+            # 4. Next & Save
             self.current_index += 1
+            self.save_progress()
             self.load_image()
             
         except Exception as e:
@@ -440,8 +487,9 @@ class LabelTool:
             
             print(f"Ambiguous (Skipped): {basename} -> {out_img}")
             
-            # Next
+            # Next & Save
             self.current_index += 1
+            self.save_progress()
             self.load_image()
             
         except Exception as e:
