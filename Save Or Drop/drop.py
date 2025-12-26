@@ -264,7 +264,9 @@ class DropTool:
             new_h = int(img_h * self.scale_factor)
             
             # Create RESIZED image for display
-            display_img = pil_img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+            # Compatibility for older Pillow versions
+            resample_method = Image.Resampling.LANCZOS if hasattr(Image, "Resampling") else Image.LANCZOS
+            display_img = pil_img.resize((new_w, new_h), resample_method)
             self.tk_image = ImageTk.PhotoImage(display_img)
             
             self.canvas.delete("all")
@@ -371,6 +373,7 @@ class DropTool:
             print(f"SAVED: {os.path.basename(self.image_list[self.current_index])}")
             self.current_index += 1
             self.count_save += 1
+            print(f"DEBUG: Save Count incremented to {self.count_save}")
             self.save_progress_file()
             self.load_image()
 
@@ -380,6 +383,7 @@ class DropTool:
             print(f"DROPPED: {os.path.basename(self.image_list[self.current_index])}")
             self.current_index += 1
             self.count_drop += 1
+            print(f"DEBUG: Drop Count incremented to {self.count_drop}")
             self.save_progress_file()
             self.load_image()
 

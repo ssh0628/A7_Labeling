@@ -451,7 +451,9 @@ class LabelTool:
             new_h = int(img_h * self.scale_factor)
             
             # Create Resized Image for display
-            display_img = pil_img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+            # Compatibility for older Pillow versions
+            resample_method = Image.Resampling.LANCZOS if hasattr(Image, "Resampling") else Image.LANCZOS
+            display_img = pil_img.resize((new_w, new_h), resample_method)
             self.tk_image = ImageTk.PhotoImage(display_img)
             
             self.canvas.delete("all")
@@ -641,6 +643,7 @@ class LabelTool:
             
             # 4. Next & Save
             self.count_labeled += 1
+            print(f"DEBUG: Label Count incremented to {self.count_labeled}")
             self.current_index += 1
             self.save_progress()
             self.load_image()
@@ -668,6 +671,7 @@ class LabelTool:
             
             # Next & Save
             self.count_skipped += 1
+            print(f"DEBUG: Skip Count incremented to {self.count_skipped}")
             self.current_index += 1
             self.save_progress()
             self.load_image()
