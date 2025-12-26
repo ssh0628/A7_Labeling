@@ -307,6 +307,66 @@ class LabelTool:
             self.load_image()
             self.save_progress() # Save initial state (0 or resumed)
             
+    def load_existing_labels(self):
+        """
+        Load and visualize existing labels from the corresponding JSON file.
+        - Box: Red outline
+        - Polygon: Blue outline
+        """
+        if not self.tk_image: return
+        
+        current_img_path = self.image_list[self.current_index]
+        basename = os.path.basename(current_img_path)
+        base_name_no_ext = os.path.splitext(basename)[0]
+        json_path = os.path.join(os.path.dirname(current_img_path), base_name_no_ext + ".json")
+        
+        if not os.path.exists(json_path):
+            return
+
+        try:
+            with open(json_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                
+            labeling_info = data.get("labelingInfo", [])
+            
+            for item in labeling_info:
+                # 1. Box
+                if "box" in item:
+                    box_data = item["box"]
+                    loc_list = box_data.get("location", [])
+                    # location could be a list of dicts
+                    for loc in loc_list:
+                        x = loc.get("x", 0)
+                        y = loc.get("y", 0)
+                        w = loc.get("width", 0)
+                        h = loc.get("height", 0)
+                        self.canvas.create_rectangle(x, y, x+w, y+h, outline="red", width=2, tags="existing_label")
+                        
+                # 2. Polygon
+                if "polygon" in item:
+                    poly_data = item["polygon"]
+                    loc_list = poly_data.get("location", [])
+                    for loc in loc_list:
+                        # loc is like {"x1": 100, "y1": 100, "x2": 105, "y2": 105, ...}
+                        # We need to flatten this to [x1, y1, x2, y2, ...]
+                        coords = []
+                        i = 1
+                        while True:
+                            kx = f"x{i}"
+                            ky = f"y{i}"
+                            if kx in loc and ky in loc:
+                                coords.append(loc[kx])
+                                coords.append(loc[ky])
+                                i += 1
+                            else:
+                                break
+                        
+                        if coords:
+                            self.canvas.create_polygon(coords, outline="blue", width=2, fill="", tags="existing_label")
+                            
+        except Exception as e:
+            print(f"Failed to load existing labels for {basename}: {e}")
+
     def load_image(self):
         # Guard: End of list
         if self.current_index >= len(self.image_list):
@@ -330,6 +390,9 @@ class LabelTool:
             
             # Cursor Box
             self.rect_id = self.canvas.create_rectangle(0, 0, 0, 0, outline=BOX_COLOR, width=BOX_WIDTH)
+            
+            # Load & Visualize Existing Labels
+            self.load_existing_labels()
             
         except Exception as e:
             messagebox.showerror("Error", f"Failed to load image: {e}")
