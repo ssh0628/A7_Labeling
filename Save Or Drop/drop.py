@@ -17,7 +17,7 @@ FONT_STATUS = ("Arial", 12)
 class DropTool:
     def __init__(self, root):
         self.root = root
-        self.root.title("Data Classification Tool - SAVE vs DROP (Auto-Resize)")
+        self.root.title("Data Classification Tool - SAVE vs DROP (Auto-Resize + Stats)")
         self.root.geometry("1400x900")
         
         # State
@@ -30,6 +30,10 @@ class DropTool:
         self.tk_image = None
         self.raw_pil_image = None # Original Full Size (Not used directly for display if resized)
         self.scale_factor = 1.0   # For coordinate mapping
+        
+        # Stats
+        self.count_save = 0
+        self.count_drop = 0
         
         # UI Setup
         self.setup_ui()
@@ -162,23 +166,36 @@ class DropTool:
         self.root.focus_set()
 
     def load_progress(self):
-        if not self.save_dir: return 0
+        # We also need counts now
+        if not self.save_dir: return 0, 0, 0
         json_path = os.path.join(self.save_dir, "progress_drop.json")
         if os.path.exists(json_path):
             try:
                 with open(json_path, 'r', encoding='utf-8') as f:
                     data = json.load(f)
-                    return data.get("last_index", 0)
+                    return (
+                        data.get("last_index", 0),
+                        data.get("count_save", 0),
+                        data.get("count_drop", 0)
+                    )
             except:
                 pass
-        return 0
+        return 0, 0, 0
 
     def resume_progress(self):
-        last_idx = self.load_progress()
+        last_idx, c_save, c_drop = self.load_progress()
+        
+        self.count_save = 0
+        self.count_drop = 0
+        
         if last_idx > 0:
-            if messagebox.askyesno("Resume", f"Resume from index {last_idx}?"):
+            if messagebox.askyesno("Resume", f"Resume from index {last_idx}?\n"
+                                             f"- Saved: {c_save}\n"
+                                             f"- Dropped: {c_drop}"):
                 if 0 <= last_idx < len(self.image_list):
                     self.current_index = last_idx
+                    self.count_save = c_save
+                    self.count_drop = c_drop
                 else:
                     self.current_index = 0
             else:
@@ -190,6 +207,8 @@ class DropTool:
         if not self.save_dir: return
         data = {
             "last_index": self.current_index,
+            "count_save": self.count_save,
+            "count_drop": self.count_drop,
             "total": len(self.image_list)
         }
         json_path = os.path.join(self.save_dir, "progress_drop.json")
@@ -200,15 +219,24 @@ class DropTool:
             print(f"Failed to auto-save progress: {e}")
 
     def load_image(self):
+        # Status Bar with Stats
+        current_file = ""
+        if 0 <= self.current_index < len(self.image_list):
+            current_file = os.path.basename(self.image_list[self.current_index])
+            
+        status_text = f"[{self.current_index+1}/{len(self.image_list)}] {current_file}"
+        status_text += f" | Save: {self.count_save} | Drop: {self.count_drop}"
+        
+        self.lbl_status.config(text=status_text)
+        
         if self.current_index >= len(self.image_list):
             self.tk_image = None
             self.canvas.delete("all")
-            self.lbl_status.config(text=f"All images processed! ({len(self.image_list)}/{len(self.image_list)})")
-            messagebox.showinfo("Done", "모든 이미지가 처리되었습니다!")
+            self.lbl_status.config(text=f"All images processed! | Save: {self.count_save} | Drop: {self.count_drop}")
+            messagebox.showinfo("Done", "All images processed!")
             return
             
         img_path = self.image_list[self.current_index]
-        self.lbl_status.config(text=f"[{self.current_index+1}/{len(self.image_list)}] {os.path.basename(img_path)}")
         
         try:
             pil_img = Image.open(img_path)
@@ -342,6 +370,7 @@ class DropTool:
         if self.copy_files(self.save_dir):
             print(f"SAVED: {os.path.basename(self.image_list[self.current_index])}")
             self.current_index += 1
+            self.count_save += 1
             self.save_progress_file()
             self.load_image()
 
@@ -350,6 +379,7 @@ class DropTool:
         if self.copy_files(self.drop_dir):
             print(f"DROPPED: {os.path.basename(self.image_list[self.current_index])}")
             self.current_index += 1
+            self.count_drop += 1
             self.save_progress_file()
             self.load_image()
 
@@ -375,10 +405,14 @@ class DropTool:
         
         deleted_log = []
         
+        was_saved = False
+        was_dropped = False
+        
         try:
             if os.path.exists(save_img):
                 os.remove(save_img)
                 deleted_log.append("SAVE_IMG")
+                was_saved = True
             if os.path.exists(save_json):
                 os.remove(save_json)
                 deleted_log.append("SAVE_JSON")
@@ -386,11 +420,18 @@ class DropTool:
             if os.path.exists(drop_img):
                 os.remove(drop_img)
                 deleted_log.append("DROP_IMG")
+                was_dropped = True
             if os.path.exists(drop_json):
                 os.remove(drop_json)
                 deleted_log.append("DROP_JSON")
                 
             print(f"Undo complete for {basename}: {', '.join(deleted_log)}")
+            
+            # Decrement Logic
+            if was_saved:
+                self.count_save = max(0, self.count_save - 1)
+            elif was_dropped:
+                self.count_drop = max(0, self.count_drop - 1)
             
         except Exception as e:
             messagebox.showerror("Error", f"Undo failed to delete files: {e}")

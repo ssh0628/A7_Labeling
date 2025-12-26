@@ -117,7 +117,7 @@ def transform_json_data(original_data, top_left_x, top_left_y, box_w=224, box_h=
 class LabelTool:
     def __init__(self, root):
         self.root = root
-        self.root.title("Data Labeling Tool - A7 Converter & Ambiguous Filter (Auto-Resize)")
+        self.root.title("Data Labeling Tool - A7 Converter & Ambiguous Filter (Auto-Resize + Stats)")
         self.root.geometry("1400x900")
         
         # State
@@ -132,6 +132,10 @@ class LabelTool:
         self.box_w = 224
         self.box_h = 224
         self.rect_id = None
+        
+        # Stats
+        self.count_labeled = 0
+        self.count_skipped = 0
         
         # Ensure Dirs (Only if paths are set)
         self.ensure_dirs()
@@ -249,7 +253,7 @@ class LabelTool:
         
     def save_progress(self):
         """
-        Auto-save current index to progress.json in TARGET_OUTPUT_DIR.
+        Auto-save current index and counts to progress.json in TARGET_OUTPUT_DIR.
         """
         if not self.target_dir or not os.path.exists(self.target_dir):
             return
@@ -260,7 +264,9 @@ class LabelTool:
             
         data = {
             "last_index": self.current_index,
-            "last_file": last_file
+            "last_file": last_file,
+            "count_labeled": self.count_labeled,
+            "count_skipped": self.count_skipped
         }
         
         json_path = os.path.join(self.target_dir, "progress.json")
@@ -293,6 +299,8 @@ class LabelTool:
             
             # --- Resume Logic ---
             self.current_index = 0
+            self.count_labeled = 0
+            self.count_skipped = 0
             
             if self.target_dir:
                 progress_path = os.path.join(self.target_dir, "progress.json")
@@ -302,13 +310,27 @@ class LabelTool:
                             data = json.load(f)
                             last_idx = data.get("last_index", 0)
                             
+                            # Restore Stats
+                            self.count_labeled = data.get("count_labeled", 0)
+                            self.count_skipped = data.get("count_skipped", 0)
+                            
                         # Confirm Resume
-                        if messagebox.askyesno("Resume", f"이전 작업 기록({last_idx}번째)이 있습니다.\n이어서 하시겠습니까?"):
+                        if messagebox.askyesno("Resume", f"이전 작업 기록({last_idx}번째)이 있습니다.\n"
+                                                         f"- Labeled: {self.count_labeled}\n"
+                                                         f"- Skipped: {self.count_skipped}\n"
+                                                         f"이어서 하시겠습니까?"):
                             if 0 <= last_idx < len(self.image_list):
                                 self.current_index = last_idx
                             else:
                                 messagebox.showwarning("Warning", "저장된 인덱스가 범위를 벗어났습니다. 처음부터 시작합니다.")
                                 self.current_index = 0
+                                self.count_labeled = 0
+                                self.count_skipped = 0
+                        else:
+                            # Reset if user chooses NO
+                            self.count_labeled = 0
+                            self.count_skipped = 0
+                            
                     except Exception as e:
                         print(f"Failed to load progress: {e}")
             
@@ -386,16 +408,23 @@ class LabelTool:
             print(f"Failed to load existing labels for {basename}: {e}")
 
     def load_image(self):
+        # Update Status Bar with Stats
+        status_text = f"[{self.current_index+1}/{len(self.image_list)}]"
+        if 0 <= self.current_index < len(self.image_list):
+            status_text += f" {os.path.basename(self.image_list[self.current_index])}"
+            
+        status_text += f" | Labeled: {self.count_labeled} | Skipped: {self.count_skipped}"
+        
+        self.lbl_status.config(text=status_text)
+        
         # Guard: End of list
         if self.current_index >= len(self.image_list):
             self.tk_image = None
             self.canvas.delete("all")
             messagebox.showinfo("Done", "모든 이미지가 처리되었습니다!")
-            self.lbl_status.config(text="완료")
             return
             
         img_path = self.image_list[self.current_index]
-        self.lbl_status.config(text=f"[{self.current_index+1}/{len(self.image_list)}] {os.path.basename(img_path)}")
         
         try:
             pil_img = Image.open(img_path)
@@ -529,6 +558,9 @@ class LabelTool:
         # B. Ambiguous Path (AMBIGUOUS_DIR)
         amb_jpg = os.path.join(self.ambiguous_dir, basename)
         
+        deleted_count_labeled = False
+        deleted_count_skipped = False
+        
         deleted_msg = []
         
         # Try Delete
@@ -536,20 +568,30 @@ class LabelTool:
             if os.path.exists(target_jpg):
                 os.remove(target_jpg)
                 deleted_msg.append("Labeled JPG")
+                deleted_count_labeled = True # Was labeled
+                
             if os.path.exists(target_json):
                 os.remove(target_json)
                 deleted_msg.append("Labeled JSON")
+                
             if os.path.exists(amb_jpg):
                 os.remove(amb_jpg)
                 deleted_msg.append("Ambiguous JPG")
+                deleted_count_skipped = True # Was skipped
                 
             print(f"Undo (Deleted): {', '.join(deleted_msg)} for {basename}")
+            
+            # Decrement Stats
+            if deleted_count_labeled:
+                self.count_labeled = max(0, self.count_labeled - 1)
+            elif deleted_count_skipped:
+                self.count_skipped = max(0, self.count_skipped - 1)
             
         except Exception as e:
             print(f"Undo Error (Delete failed): {e}")
             
         # 3. Load the image again + Auto Save
-        self.save_progress() # Save the decremented index
+        self.save_progress() # Save the decremented index and stats
         self.load_image()
 
     def process_image_labeled(self, x, y):
@@ -598,6 +640,7 @@ class LabelTool:
             print(f"Labeled: {basename} -> {out_img}")
             
             # 4. Next & Save
+            self.count_labeled += 1
             self.current_index += 1
             self.save_progress()
             self.load_image()
@@ -624,6 +667,7 @@ class LabelTool:
             print(f"Ambiguous (Skipped): {basename} -> {out_img}")
             
             # Next & Save
+            self.count_skipped += 1
             self.current_index += 1
             self.save_progress()
             self.load_image()
