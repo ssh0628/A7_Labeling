@@ -160,10 +160,10 @@ class LabelTool:
         self.btn_open = tk.Button(btn_frame, text="1. 폴더 열기", command=self.open_directory, height=2, width=15)
         self.btn_open.pack(side=tk.LEFT, padx=5)
         
-        self.btn_back = tk.Button(btn_frame, text="< Back (수정/Undo)", command=self.on_back_click, height=2, width=15, bg="#eeeeee")
+        self.btn_back = tk.Button(btn_frame, text="< Back (수정/Undo) [B]", command=self.on_back_click, height=2, width=20, bg="#eeeeee")
         self.btn_back.pack(side=tk.LEFT, padx=5)
         
-        self.btn_next = tk.Button(btn_frame, text="2. Next (애매함/Skip)", command=self.on_ambiguous_click, height=2, width=20, bg="#ffdddd")
+        self.btn_next = tk.Button(btn_frame, text="2. Next (애매함/Skip) [N]", command=self.on_ambiguous_click, height=2, width=22, bg="#ffdddd")
         self.btn_next.pack(side=tk.LEFT, padx=5)
         
         # Status Label
@@ -203,6 +203,12 @@ class LabelTool:
         self.root.bind("<Button-5>", self._on_mousewheel)
         self.root.bind("<Shift-Button-4>", self._on_shift_mousewheel)
         self.root.bind("<Shift-Button-5>", self._on_shift_mousewheel)
+
+        # Keyboard Shortcuts
+        self.root.bind("<n>", lambda e: self.on_ambiguous_click())
+        self.root.bind("<N>", lambda e: self.on_ambiguous_click())
+        self.root.bind("<b>", lambda e: self.on_back_click())
+        self.root.bind("<B>", lambda e: self.on_back_click())
 
     def _on_mousewheel(self, event):
         """Vertical scroll logic"""
