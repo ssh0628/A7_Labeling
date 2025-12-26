@@ -11,8 +11,8 @@ import math
 
 # 1. TARGET_OUTPUT_DIR: 정상적으로 라벨링(A7)된 결과물이 저장될 폴더
 # 2. AMBIGUOUS_DIR: 'Next(애매함)' 버튼 클릭 시 원본 이미지가 격리될 폴더
-TARGET_OUTPUT_DIR = None
-AMBIGUOUS_DIR = None
+TARGET_OUTPUT_DIR = r"."
+AMBIGUOUS_DIR = r"."
 
 # [STYLE CONFIGURATION]
 BOX_COLOR = "#27b73c" # 건들지 마세요
