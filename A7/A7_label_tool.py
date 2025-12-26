@@ -7,6 +7,7 @@ import shutil
 import copy
 import glob
 import re
+import math
 
 # 1. TARGET_OUTPUT_DIR: 정상적으로 라벨링(A7)된 결과물이 저장될 폴더
 # 2. AMBIGUOUS_DIR: 'Next(애매함)' 버튼 클릭 시 원본 이미지가 격리될 폴더
@@ -116,7 +117,7 @@ def transform_json_data(original_data, top_left_x, top_left_y, box_w=224, box_h=
 class LabelTool:
     def __init__(self, root):
         self.root = root
-        self.root.title("Data Labeling Tool - A7 Converter & Ambiguous Filter")
+        self.root.title("Data Labeling Tool - A7 Converter & Ambiguous Filter (Auto-Resize)")
         self.root.geometry("1400x900")
         
         # State
@@ -127,6 +128,7 @@ class LabelTool:
         self.ambiguous_dir = AMBIGUOUS_DIR
         self.tk_image = None
         self.raw_pil_image = None
+        self.scale_factor = 1.0  # Resize factor (visual / original)
         self.box_w = 224
         self.box_h = 224
         self.rect_id = None
@@ -316,6 +318,7 @@ class LabelTool:
     def load_existing_labels(self):
         """
         Load and visualize existing labels from the corresponding JSON file.
+        Scale coordinates by self.scale_factor.
         - Box: Red outline
         - Polygon: Blue outline
         """
@@ -334,6 +337,7 @@ class LabelTool:
                 data = json.load(f)
                 
             labeling_info = data.get("labelingInfo", [])
+            factor = self.scale_factor
             
             for item in labeling_info:
                 # 1. Box
@@ -342,27 +346,35 @@ class LabelTool:
                     loc_list = box_data.get("location", [])
                     # location could be a list of dicts
                     for loc in loc_list:
+                        # Original Coords
                         x = loc.get("x", 0)
                         y = loc.get("y", 0)
                         w = loc.get("width", 0)
                         h = loc.get("height", 0)
-                        self.canvas.create_rectangle(x, y, x+w, y+h, outline="red", width=2, tags="existing_label")
+                        
+                        # Scaled Coords for Visual
+                        sx = x * factor
+                        sy = y * factor
+                        sw = w * factor
+                        sh = h * factor
+                        
+                        self.canvas.create_rectangle(sx, sy, sx+sw, sy+sh, outline="red", width=2, tags="existing_label")
                         
                 # 2. Polygon
                 if "polygon" in item:
                     poly_data = item["polygon"]
                     loc_list = poly_data.get("location", [])
                     for loc in loc_list:
-                        # loc is like {"x1": 100, "y1": 100, "x2": 105, "y2": 105, ...}
-                        # We need to flatten this to [x1, y1, x2, y2, ...]
+                        # loc is like {"x1": 100, "y1": 100, ...}
+                        # We need to flatten and scale
                         coords = []
                         i = 1
                         while True:
                             kx = f"x{i}"
                             ky = f"y{i}"
                             if kx in loc and ky in loc:
-                                coords.append(loc[kx])
-                                coords.append(loc[ky])
+                                coords.append(loc[kx] * factor)
+                                coords.append(loc[ky] * factor)
                                 i += 1
                             else:
                                 break
@@ -388,13 +400,36 @@ class LabelTool:
         try:
             pil_img = Image.open(img_path)
             self.raw_pil_image = pil_img
-            self.tk_image = ImageTk.PhotoImage(pil_img)
+            
+            # --- Auto-Resize Logic ---
+            screen_w = self.root.winfo_screenwidth()
+            screen_h = self.root.winfo_screenheight()
+            
+            target_w = screen_w * 0.9
+            target_h = screen_h * 0.9
+            
+            img_w, img_h = pil_img.size
+            self.scale_factor = 1.0
+            
+            # Check if scaling is needed
+            scale_w = target_w / img_w
+            scale_h = target_h / img_h
+            
+            if scale_w < 1.0 or scale_h < 1.0:
+                self.scale_factor = min(scale_w, scale_h)
+                
+            new_w = int(img_w * self.scale_factor)
+            new_h = int(img_h * self.scale_factor)
+            
+            # Create Resized Image for display
+            display_img = pil_img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+            self.tk_image = ImageTk.PhotoImage(display_img)
             
             self.canvas.delete("all")
-            self.canvas.config(scrollregion=(0, 0, pil_img.width, pil_img.height))
+            self.canvas.config(scrollregion=(0, 0, new_w, new_h))
             self.canvas.create_image(0, 0, image=self.tk_image, anchor=tk.NW)
             
-            # Cursor Box
+            # Cursor Box (Reset ID)
             self.rect_id = self.canvas.create_rectangle(0, 0, 0, 0, outline=BOX_COLOR, width=BOX_WIDTH)
             
             # Load & Visualize Existing Labels
@@ -404,13 +439,27 @@ class LabelTool:
             messagebox.showerror("Error", f"Failed to load image: {e}")
 
     def get_clamped_box_coords(self, mouse_x, mouse_y):
-        if not self.raw_pil_image: return 0, 0
+        """
+        Returns SCALED coordinates clamped to the RESIZED image.
+        Uses this for visual drawing of the cursor box.
+        """
+        if not self.tk_image: return 0, 0
         
-        # Center the box on mouse
-        tl_x = mouse_x - (self.box_w // 2)
-        tl_y = mouse_y - (self.box_h // 2)
+        # Display Box Size
+        disp_w = self.box_w * self.scale_factor
+        disp_h = self.box_h * self.scale_factor
         
-        final_x, final_y = clamp_coordinates(tl_x, tl_y, self.raw_pil_image.width, self.raw_pil_image.height)
+        # Center the box on mouse (Visual Coords)
+        tl_x = mouse_x - (disp_w / 2)
+        tl_y = mouse_y - (disp_h / 2)
+        
+        # Clamp to RESIZED image dimensions
+        img_w = self.tk_image.width()
+        img_h = self.tk_image.height()
+        
+        final_x = max(0, min(tl_x, img_w - disp_w))
+        final_y = max(0, min(tl_y, img_h - disp_h))
+        
         return final_x, final_y
 
     def on_mouse_move(self, event):
@@ -420,7 +469,12 @@ class LabelTool:
         canvas_y = self.canvas.canvasy(event.y)
         
         lx, ly = self.get_clamped_box_coords(canvas_x, canvas_y)
-        self.canvas.coords(self.rect_id, lx, ly, lx + self.box_w, ly + self.box_h)
+        
+        # Scaled Dimensions for Visual Box
+        disp_w = self.box_w * self.scale_factor
+        disp_h = self.box_h * self.scale_factor
+        
+        self.canvas.coords(self.rect_id, lx, ly, lx + disp_w, ly + disp_h)
         
     def on_click_canvas(self, event):
         # Guard
@@ -430,10 +484,15 @@ class LabelTool:
         canvas_x = self.canvas.canvasx(event.x)
         canvas_y = self.canvas.canvasy(event.y)
         
+        # Get Visual (Scaled) Coords
         final_x, final_y = self.get_clamped_box_coords(canvas_x, canvas_y)
         
+        # Convert to Original Coords for Saving
+        orig_x = final_x / self.scale_factor
+        orig_y = final_y / self.scale_factor
+        
         # Regular Process: Label and Save
-        self.process_image_labeled(final_x, final_y)
+        self.process_image_labeled(orig_x, orig_y)
         
     def on_ambiguous_click(self):
         # Guard
@@ -508,6 +567,7 @@ class LabelTool:
             with open(json_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
             
+            # x, y are ORIGINAL coordinates here
             new_data = transform_json_data(data, x, y, self.box_w, self.box_h)
             
             # 2. Filename Generation
@@ -522,6 +582,10 @@ class LabelTool:
             if not self.target_dir:
                 messagebox.showerror("Error", "TARGET_OUTPUT_DIR is not set!")
                 return
+            
+            # Ensure target output directory exists (safe check)
+            if not os.path.exists(self.target_dir):
+                 os.makedirs(self.target_dir)
 
             out_img = os.path.join(self.target_dir, new_img_name)
             out_json = os.path.join(self.target_dir, new_json_name)
@@ -549,6 +613,9 @@ class LabelTool:
             if not self.ambiguous_dir:
                 messagebox.showerror("Error", "AMBIGUOUS_DIR is not set!")
                 return
+            
+            if not os.path.exists(self.ambiguous_dir):
+                os.makedirs(self.ambiguous_dir)
 
             # Just copy image to AMBIGUOUS_DIR
             out_img = os.path.join(self.ambiguous_dir, basename)

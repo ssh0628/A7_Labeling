@@ -5,7 +5,7 @@ import os
 import json
 import shutil
 import glob
-import re
+import math
 
 # [STYLE CONFIGURATION]
 BOX_COLOR_RED = "red"
@@ -17,7 +17,7 @@ FONT_STATUS = ("Arial", 12)
 class DropTool:
     def __init__(self, root):
         self.root = root
-        self.root.title("Data Classification Tool - SAVE vs DROP")
+        self.root.title("Data Classification Tool - SAVE vs DROP (Auto-Resize)")
         self.root.geometry("1400x900")
         
         # State
@@ -28,7 +28,8 @@ class DropTool:
         self.drop_dir = None
         
         self.tk_image = None
-        self.raw_pil_image = None
+        self.raw_pil_image = None # Original Full Size (Not used directly for display if resized)
+        self.scale_factor = 1.0   # For coordinate mapping
         
         # UI Setup
         self.setup_ui()
@@ -91,7 +92,6 @@ class DropTool:
         self.root.bind("<D>", lambda e: self.drop_current())
         self.root.bind("<b>", lambda e: self.undo())
         self.root.bind("<B>", lambda e: self.undo())
-        # Keep arrow keys as backup
         self.root.bind("<Left>", lambda e: self.undo())
         
         # --- Mouse Wheel Scrolling ---
@@ -159,7 +159,6 @@ class DropTool:
         self.resume_progress()
         self.load_image()
         
-        # Ensure focus is on the main window for key binds to work
         self.root.focus_set()
 
     def load_progress(self):
@@ -213,14 +212,38 @@ class DropTool:
         
         try:
             pil_img = Image.open(img_path)
-            self.raw_pil_image = pil_img
-            self.tk_image = ImageTk.PhotoImage(pil_img)
+            self.raw_pil_image = pil_img # Keep original for COPY
+            
+            # --- Auto-Resize Logic ---
+            screen_w = self.root.winfo_screenwidth()
+            screen_h = self.root.winfo_screenheight()
+            
+            target_w = screen_w * 0.9
+            target_h = screen_h * 0.9
+            
+            img_w, img_h = pil_img.size
+            self.scale_factor = 1.0
+            
+            # Use min scale to fit BOTH width and height if needed
+            scale_w = target_w / img_w
+            scale_h = target_h / img_h
+            
+            # If image is bigger than target in either dim, scale down
+            if scale_w < 1.0 or scale_h < 1.0:
+                self.scale_factor = min(scale_w, scale_h)
+                
+            new_w = int(img_w * self.scale_factor)
+            new_h = int(img_h * self.scale_factor)
+            
+            # Create RESIZED image for display
+            display_img = pil_img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+            self.tk_image = ImageTk.PhotoImage(display_img)
             
             self.canvas.delete("all")
-            self.canvas.config(scrollregion=(0, 0, pil_img.width, pil_img.height))
+            self.canvas.config(scrollregion=(0, 0, new_w, new_h))
             self.canvas.create_image(0, 0, image=self.tk_image, anchor=tk.NW)
             
-            # Visualize Labels
+            # Visualize Labels with Scale
             self.load_existing_labels()
             
         except Exception as e:
@@ -229,6 +252,7 @@ class DropTool:
     def load_existing_labels(self):
         """
         Load and visualize existing labels from the corresponding JSON file.
+        Apply self.scale_factor to all coordinates.
         - Box: Red outline
         - Polygon: Blue outline
         """
@@ -248,6 +272,8 @@ class DropTool:
                 
             labeling_info = data.get("labelingInfo", [])
             
+            factor = self.scale_factor
+            
             for item in labeling_info:
                 # 1. Box
                 if "box" in item:
@@ -255,27 +281,35 @@ class DropTool:
                     loc_list = box_data.get("location", [])
                     # location could be a list of dicts
                     for loc in loc_list:
+                        # Original Coords
                         x = loc.get("x", 0)
                         y = loc.get("y", 0)
                         w = loc.get("width", 0)
                         h = loc.get("height", 0)
-                        self.canvas.create_rectangle(x, y, x+w, y+h, outline=BOX_COLOR_RED, width=BOX_WIDTH, tags="existing_label")
+                        
+                        # Scaled Coords
+                        sx = x * factor
+                        sy = y * factor
+                        sw = w * factor
+                        sh = h * factor
+                        
+                        self.canvas.create_rectangle(sx, sy, sx+sw, sy+sh, outline=BOX_COLOR_RED, width=BOX_WIDTH, tags="existing_label")
                         
                 # 2. Polygon
                 if "polygon" in item:
                     poly_data = item["polygon"]
                     loc_list = poly_data.get("location", [])
                     for loc in loc_list:
-                        # loc is like {"x1": 100, "y1": 100, "x2": 105, "y2": 105, ...}
-                        # We need to flatten this to [x1, y1, x2, y2, ...]
+                        # loc is like {"x1": 100, "y1": 100, ...}
+                        # We need to flatten and scale
                         coords = []
                         i = 1
                         while True:
                             kx = f"x{i}"
                             ky = f"y{i}"
                             if kx in loc and ky in loc:
-                                coords.append(loc[kx])
-                                coords.append(loc[ky])
+                                coords.append(loc[kx] * factor)
+                                coords.append(loc[ky] * factor)
                                 i += 1
                             else:
                                 break
