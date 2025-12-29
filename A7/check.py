@@ -6,16 +6,13 @@ import tkinter as tk
 from tkinter import filedialog, messagebox
 from PIL import Image, ImageTk
 
-ORIGINAL_ROOT = r""
-DEFAULT_INPUT_DIR = r""
-REJECT_FOLDER_NAME = "_REJECTED"
 
-# 진행 상황 저장 파일
+ORIGINAL_ROOT = r"/Users/sonseunghyeon/Desktop/creamoff/workspace/labeling/테스트용 파일/변환 전"
+DEFAULT_INPUT_DIR = r"/Users/sonseunghyeon/Desktop/creamoff/workspace/labeling/테스트용 파일/변환 후"
+
+REJECT_FOLDER_NAME = "_REJECTED"
 PROGRESS_FILE = "verify_progress.json"
 
-# =============================================================================
-# 2. 메인 클래스 (VerifyTool)
-# =============================================================================
 class VerifyTool:
     def __init__(self, root):
         self.root = root
@@ -23,7 +20,7 @@ class VerifyTool:
         self.root.geometry("1400x1000")
 
         # --- 상태 변수 ---
-        self.image_list = []      # (jpg_path, json_path) 튜플 리스트
+        self.image_list = [] # (jpg_path, json_path) 튜플 리스트
         self.current_index = 0
         self.input_dir = ""
         self.reject_dir = ""
@@ -49,6 +46,10 @@ class VerifyTool:
         self.root.bind("<Key-S>", self.action_ok)
         self.root.bind("<Key-R>", self.action_reject)
         self.root.bind("<Key-B>", self.action_back)
+
+        # [Auto Load]
+        # 실행 후 UI가 준비되면 자동으로 기본 폴더 로드 시도
+        self.root.after(100, self.try_auto_load)
 
     def _init_ui(self):
         # 1. 상단 패널
@@ -78,12 +79,25 @@ class VerifyTool:
         lbl_guide = tk.Label(bottom_frame, text="[S]: OK (Keep)   |   [R]: Reject (Move)   |   [B]: Back (Undo)", font=("Arial", 12), fg="blue")
         lbl_guide.pack()
 
+    def try_auto_load(self):
+        """기본 설정된 폴더가 존재하면 자동으로 로드합니다."""
+        print(f"[DEBUG] Checking Default Input Dir: {DEFAULT_INPUT_DIR}")
+        if os.path.exists(DEFAULT_INPUT_DIR):
+            print("[DEBUG] Default dir exists. Auto-loading...")
+            self.load_directory(DEFAULT_INPUT_DIR)
+        else:
+            print("[DEBUG] Default dir does not exist.")
+
     def open_folder(self):
         initial_dir = DEFAULT_INPUT_DIR if os.path.exists(DEFAULT_INPUT_DIR) else os.getcwd()
         path = filedialog.askdirectory(initialdir=initial_dir, title="Select A7 Output Folder")
         if not path:
             return
-        
+        self.load_directory(path)
+
+    def load_directory(self, path):
+        """실질적인 폴더 로드 로직"""
+        print(f"[DEBUG] Loading directory: {path}")
         self.input_dir = path
         self.reject_dir = os.path.join(self.input_dir, REJECT_FOLDER_NAME)
         os.makedirs(self.reject_dir, exist_ok=True)
@@ -91,13 +105,12 @@ class VerifyTool:
         self.load_file_list()
 
         if self.load_progress():
-             ans = messagebox.askyesno("Resume", "이전 작업 기록이 있습니다. 이어서 하시겠습니까?")
-             if not ans:
-                 self.current_index = 0
-                 self.count_ok = 0
-                 self.count_reject = 0
+             print("[DEBUG] Progress file found. Resuming...")
+             # 자동 로드 시에는 사용자 확인 없이 로드하거나 로그만 남김
+             pass 
         
         if not self.image_list:
+            print("[DEBUG] No jpg files found.")
             messagebox.showinfo("Info", "No jpg files found (or all moved).")
             return
             
@@ -107,11 +120,14 @@ class VerifyTool:
         # JPG 파일 스캔
         jpgs = sorted(glob.glob(os.path.join(self.input_dir, "*.jpg")))
         self.image_list = []
+        print(f"[DEBUG] Scanning for jpg files in {self.input_dir}")
         for img_path in jpgs:
             json_path = os.path.splitext(img_path)[0] + ".json"
             if os.path.exists(json_path):
                 self.image_list.append((img_path, json_path))
-        print(f"Loaded {len(self.image_list)} files.")
+            else:
+                print(f"[DEBUG] Skipping {os.path.basename(img_path)} (No JSON found)")
+        print(f"[DEBUG] Loaded {len(self.image_list)} valid image-json pairs.")
 
     def load_progress(self):
         progress_path = os.path.join(self.input_dir, PROGRESS_FILE)
@@ -123,14 +139,15 @@ class VerifyTool:
                     self.count_ok = data.get("count_ok", 0)
                     self.count_reject = data.get("count_reject", 0)
                     
-                    # 파일 리스트가 변경되었을 수 있으므로 인덱스 유효성 체크
                     if 0 <= saved_idx < len(self.image_list):
                         self.current_index = saved_idx
                     else:
+                        print(f"[DEBUG] Saved index {saved_idx} out of range (List len: {len(self.image_list)}). Reset to 0.")
                         self.current_index = 0
+                print(f"[DEBUG] Progress loaded. Index: {self.current_index}, OK: {self.count_ok}, REJECT: {self.count_reject}")
                 return True
             except Exception as e:
-                print(f"Error loading progress: {e}")
+                print(f"[ERROR] Error loading progress: {e}")
         return False
 
     def save_progress(self):
@@ -146,28 +163,33 @@ class VerifyTool:
             json.dump(data, f, ensure_ascii=False, indent=2)
 
     def extract_id(self, filename):
-        # IMG_123_A7_정상.jpg -> IMG_123
         base = os.path.basename(filename)
+        id_str = ""
         if "_A7" in base:
-            return base.split("_A7")[0]
-        return os.path.splitext(base)[0]
+            id_str = base.split("_A7")[0]
+        else:
+            id_str = os.path.splitext(base)[0]
+        return id_str
 
     def find_original_json(self, file_id):
         # ORIGINAL_ROOT 재귀 탐색
+        print(f"[DEBUG] Searching for Original JSON ID: {file_id}")
         for root, dirs, files in os.walk(ORIGINAL_ROOT):
             for f in files:
                 if f.endswith(".json"):
-                    # 정확한 매칭 로직
                     name_body = os.path.splitext(f)[0]
-                    # IMG_123.json or IMG_123_meta.json etc. 
-                    # 단순 startswith만 하면 IMG_1이 IMG_10에 매칭될 수 있으므로 주의
                     if name_body == file_id or name_body.startswith(file_id + "_"):
-                        return os.path.join(root, f)
+                        full_path = os.path.join(root, f)
+                        print(f"[DEBUG] Found Original JSON: {full_path}")
+                        return full_path
+        print(f"[DEBUG] Original JSON NOT found for ID: {file_id}")
         return None
 
     def load_current_image(self):
         if 0 <= self.current_index < len(self.image_list):
             img_path, json_path = self.image_list[self.current_index]
+            print(f"[DEBUG] Loading Image [{self.current_index}]: {os.path.basename(img_path)}")
+            
             self.current_jpg_path = img_path
             self.current_json_path = json_path
             
@@ -176,19 +198,19 @@ class VerifyTool:
             self.update_stats()
             self.save_progress()
             
-            # 포커스 유지
             self.root.focus_set()
         else:
+            print("[DEBUG] End of list reached.")
             self.canvas.delete("all")
             self.lbl_stats.config(text="End of List.")
             if self.image_list:
-                # 마지막 처리 후
                  messagebox.showinfo("Done", "End of list reached.")
 
     def display_image(self, img_path):
         try:
             pil_img = Image.open(img_path)
-        except Exception:
+        except Exception as e:
+            print(f"[ERROR] Failed to open image {img_path}: {e}")
             return
             
         w, h = pil_img.size
@@ -211,7 +233,6 @@ class VerifyTool:
         self.canvas.create_image(0, 0, anchor=tk.NW, image=self.img_tk)
 
     def draw_box(self, box, color, width, label_text=None):
-        # Box: [x, y, w, h]
         x, y, w, h = box
         x *= self.scale_factor
         y *= self.scale_factor
@@ -223,22 +244,79 @@ class VerifyTool:
             self.canvas.create_text(x, y-10, text=label_text, fill=color, anchor=tk.SW, font=("Arial", 10, "bold"))
 
     def draw_overlays(self):
+        # Helper to parse box
+        def parse_box(item_node):
+            # item_node could be item["box"]
+            # Structure A: { "location": [ { "x":... } ] }
+            if "location" in item_node and isinstance(item_node["location"], list) and len(item_node["location"]) > 0:
+                loc = item_node["location"][0]
+                return [loc.get('x',0), loc.get('y',0), loc.get('width',0), loc.get('height',0)]
+            # Structure B: { "x": ..., "y": ... }
+            elif "x" in item_node:
+                return [item_node.get('x',0), item_node.get('y',0), item_node.get('width',0), item_node.get('height',0)]
+            # Structure C: [x, y, w, h]
+            elif isinstance(item_node, list) and len(item_node) >= 4:
+                return item_node
+            return None
+
+        # Helper to parse polygon
+        def parse_polygon(item_node):
+            # item_node could be item["polygon"]
+            # Structure: { "location": [ { "x1":..., "y1":..., "x2":... } ] }
+            points = []
+            if "location" in item_node and isinstance(item_node["location"], list) and len(item_node["location"]) > 0:
+                loc = item_node["location"][0]
+                # Extract x1, y1, x2, y2 ...
+                i = 1
+                while True:
+                    kx, ky = f"x{i}", f"y{i}"
+                    if kx in loc and ky in loc:
+                        points.append(loc[kx])
+                        points.append(loc[ky])
+                        i += 1
+                    else:
+                        break
+            return points
+
+        # Helper to draw polygon
+        def draw_poly(points, color, width, label_text=None):
+            if not points or len(points) < 4:
+                return
+            # Scale points
+            scaled_points = [p * self.scale_factor for p in points]
+            try:
+                self.canvas.create_polygon(scaled_points, outline=color, fill='', width=width)
+                if label_text:
+                    self.canvas.create_text(scaled_points[0], scaled_points[1] - 10, text=label_text, fill=color, anchor=tk.SW, font=("Arial", 10, "bold"))
+            except Exception as e:
+                print(f"[ERROR] draw_poly failed: {e}")
+
         # 1. A7 (Green)
         if self.current_json_path and os.path.exists(self.current_json_path):
             try:
                 with open(self.current_json_path, 'r', encoding='utf-8') as f:
                     data = json.load(f)
                 if "labelingInfo" in data:
+                    count_box = 0
+                    count_poly = 0
                     for item in data["labelingInfo"]:
+                        # Box
                         if "box" in item:
-                            bx = item["box"]
-                            if isinstance(bx, dict):
-                                b = [bx.get('x',0), bx.get('y',0), bx.get('width',0), bx.get('height',0)]
-                            else: b = bx
-                            lbl = item.get("label", {}).get("labelName", "A7")
-                            self.draw_box(b, "green", 3, f"A7:{lbl}")
+                            b = parse_box(item["box"])
+                            if b:
+                                lbl = item.get("label", {}).get("labelName", "A7") if isinstance(item.get("label"), dict) else "A7"
+                                self.draw_box(b, "green", 3, f"A7:{lbl}")
+                                count_box += 1
+                        # Polygon
+                        if "polygon" in item:
+                            pts = parse_polygon(item["polygon"])
+                            if pts:
+                                lbl = item.get("label", {}).get("labelName", "A7") if isinstance(item.get("label"), dict) else "A7"
+                                draw_poly(pts, "green", 3, f"A7:{lbl}")
+                                count_poly += 1
+                    print(f"[DEBUG] Drawn A7 -> Box: {count_box}, Poly: {count_poly}")
             except Exception as e:
-                print(f"A7 JSON Error: {e}")
+                print(f"[ERROR] A7 JSON Error: {e}")
 
         # 2. Original (Blue)
         if self.var_show_original.get() and self.current_jpg_path:
@@ -249,21 +327,30 @@ class VerifyTool:
                     with open(orig_path, 'r', encoding='utf-8') as f:
                         data = json.load(f)
                     if "labelingInfo" in data:
+                        count_box = 0
+                        count_poly = 0
                         for item in data["labelingInfo"]:
+                            # Box
                             if "box" in item:
-                                bx = item["box"]
-                                if isinstance(bx, dict):
-                                    b = [bx.get('x',0), bx.get('y',0), bx.get('width',0), bx.get('height',0)]
-                                else: b = bx
-                                lbl = item.get("label", {}).get("labelName", "Orig")
-                                self.draw_box(b, "blue", 1, f"Org:{lbl}")
+                                b = parse_box(item["box"])
+                                if b:
+                                    lbl = item.get("label", {}).get("labelName", "Orig") if isinstance(item.get("label"), dict) else "Orig"
+                                    self.draw_box(b, "blue", 1, f"Org:{lbl}")
+                                    count_box += 1
+                            # Polygon
+                            if "polygon" in item:
+                                pts = parse_polygon(item["polygon"])
+                                if pts:
+                                    lbl = item.get("label", {}).get("labelName", "Orig") if isinstance(item.get("label"), dict) else "Orig"
+                                    draw_poly(pts, "red", 1, f"Org:{lbl}")
+                                    count_poly += 1
+                        print(f"[DEBUG] Drawn Orig -> Box: {count_box}, Poly: {count_poly}")
                 except Exception as e:
-                    print(f"Orig JSON Error: {e}")
+                    print(f"[ERROR] Orig JSON Error: {e}")
 
     def update_stats(self):
         name = os.path.basename(self.current_jpg_path) if self.current_jpg_path else "-"
         total = len(self.image_list)
-        # 1-based index display
         idx_display = self.current_index + 1 if self.image_list else 0
         self.lbl_stats.config(text=f"[{idx_display}/{total}] {name} | OK: {self.count_ok} | REJECT: {self.count_reject}")
 
@@ -271,15 +358,11 @@ class VerifyTool:
         if self.image_list:
             self.load_current_image()
 
-    # --- Actions ---
-
     def action_ok(self, event=None):
-        """ OK: Keep file, Next index """
         if not self.image_list or self.current_index >= len(self.image_list):
             return
 
-        # History 기록
-        # OK의 경우 파일 이동이 없으므로 단순 인덱스 기록
+        print(f"[ACTION] OK: {os.path.basename(self.current_jpg_path)}")
         self.history_stack.append({
             'action': 'OK',
             'index': self.current_index
@@ -290,7 +373,6 @@ class VerifyTool:
         self.load_current_image()
 
     def action_reject(self, event=None):
-        """ REJECT: Move file, Pop from list """
         if not self.image_list or self.current_index >= len(self.image_list):
             return
             
@@ -301,12 +383,12 @@ class VerifyTool:
         dst_jpg = os.path.join(self.reject_dir, fname_jpg)
         dst_json = os.path.join(self.reject_dir, fname_json)
         
+        print(f"[ACTION] REJECT: Moving {fname_jpg} to {self.reject_dir}")
         try:
             shutil.move(jpg_src, dst_jpg)
             if os.path.exists(json_src):
                 shutil.move(json_src, dst_json)
             
-            # History 기록 (이동된 경로, 원래 리스트에서의 인덱스)
             self.history_stack.append({
                 'action': 'REJECT',
                 'index': self.current_index,
@@ -315,31 +397,28 @@ class VerifyTool:
             })
             
             self.count_reject += 1
-            # 리스트에서 제거
             self.image_list.pop(self.current_index)
-            # 인덱스는 그대로 (다음 파일이 당겨짐). 
-            # 단, 마지막 파일이었다면 index가 len과 같아짐 -> load_current_image에서 처리.
             self.load_current_image()
             
         except Exception as e:
+            print(f"[ERROR] Move failed: {e}")
             messagebox.showerror("Error", f"Move failed: {e}")
 
     def action_back(self, event=None):
-        """ UNDO: Revert last action """
         if not self.history_stack:
+            print("[DEBUG] History stack empty, cannot Undo.")
             return
             
         last = self.history_stack.pop()
         action = last['action']
+        print(f"[ACTION] UNDO {action}")
         
         if action == 'OK':
-            # OK 취소: 인덱스 되돌리고 카운트 감소
             self.current_index = last['index']
             self.count_ok -= 1
             self.load_current_image()
             
         elif action == 'REJECT':
-            # REJECT 취소: 파일 복귀 -> 리스트 삽입 -> 인덱스 복구 -> 카운트 감소
             saved_idx = last['index']
             orig_jpg, orig_json = last['src_files']
             moved_jpg, moved_json = last['dst_files']
@@ -350,13 +429,13 @@ class VerifyTool:
                 if os.path.exists(moved_json):
                     shutil.move(moved_json, orig_json)
                 
-                # 리스트 복구
                 self.image_list.insert(saved_idx, (orig_jpg, orig_json))
                 self.current_index = saved_idx
                 self.count_reject -= 1
                 self.load_current_image()
                 
             except Exception as e:
+                print(f"[ERROR] Undo Reject failed: {e}")
                 messagebox.showerror("Error", f"Undo Reject failed: {e}")
 
 if __name__ == "__main__":
