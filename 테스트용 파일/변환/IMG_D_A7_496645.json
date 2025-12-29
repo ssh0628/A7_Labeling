@@ -1,0 +1,61 @@
+{
+  "metaData": {
+    "Raw data ID": "IMG_D_A7_496645.jpg",
+    "copyrighter": "㈜미소정보기술",
+    "resolution": "1920X1080",
+    "date": "2021-11-19",
+    "breed": "푸들",
+    "age": "10",
+    "gender": "M",
+    "region": "B",
+    "camera type": "IMG",
+    "species": "D",
+    "lesions": "A7",
+    "diagnosis": "정상",
+    "Path": "무증상",
+    "identifier": "피부질환",
+    "src_path": "/라벨링데이터/반려견/피부/일반카메라/무증상/A7_정상",
+    "label_path": "/라벨링데이터/반려견/피부/일반카메라/무증상/A7_정상",
+    "type": "json",
+    "fileformat": "jpg"
+  },
+  "inspRejectYn": "N",
+  "labelingInfo": [
+    {
+      "polygon": {
+        "color": "#27b73c",
+        "location": [
+          {
+            "x1": 1030,
+            "y1": 519,
+            "x2": 1254,
+            "y2": 519,
+            "x3": 1254,
+            "y3": 743,
+            "x4": 1030,
+            "y4": 743,
+            "x5": 1030,
+            "y5": 519
+          }
+        ],
+        "label": "A7_정상",
+        "type": "polygon"
+      }
+    },
+    {
+      "box": {
+        "color": "#27b73c",
+        "location": [
+          {
+            "x": 1030,
+            "y": 519,
+            "width": 224,
+            "height": 224
+          }
+        ],
+        "label": "A7_정상",
+        "type": "box"
+      }
+    }
+  ]
+}
