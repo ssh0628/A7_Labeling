@@ -34,6 +34,7 @@ class DropTool:
         # Stats
         self.count_save = 0
         self.count_drop = 0
+        self.history_stack = []
         
         # UI Setup
         self.setup_ui()
@@ -265,7 +266,7 @@ class DropTool:
             
             # Create RESIZED image for display
             # Compatibility for older Pillow versions
-            resample_method = Image.Resampling.LANCZOS if hasattr(Image, "Resampling") else Image.LANCZOS
+            resample_method = Image.Resampling.BICUBIC if hasattr(Image, "Resampling") else Image.BICUBIC
             display_img = pil_img.resize((new_w, new_h), resample_method)
             self.tk_image = ImageTk.PhotoImage(display_img)
             
@@ -351,25 +352,42 @@ class DropTool:
             print(f"Failed to load existing labels for {basename}: {e}")
 
     def copy_files(self, target_dir):
-        if self.current_index >= len(self.image_list): return False
+        if self.current_index >= len(self.image_list): return False, []
         
         img_path = self.image_list[self.current_index]
         basename = os.path.basename(img_path)
         base_name_no_ext = os.path.splitext(basename)[0]
         json_path = os.path.join(os.path.dirname(img_path), base_name_no_ext + ".json")
         
+        created_files = []
         try:
-            shutil.copy2(img_path, target_dir)
+            # Copy Image
+            dst_img = os.path.join(target_dir, basename)
+            shutil.copy2(img_path, dst_img)
+            created_files.append(dst_img)
+            
+            # Copy JSON if exists
             if os.path.exists(json_path):
-                shutil.copy2(json_path, target_dir)
-            return True
+                dst_json = os.path.join(target_dir, base_name_no_ext + ".json")
+                shutil.copy2(json_path, dst_json)
+                created_files.append(dst_json)
+                
+            return True, created_files
         except Exception as e:
             messagebox.showerror("Error", f"Failed to copy files: {e}")
-            return False
+            return False, []
 
     def save_current(self):
         if not self.save_dir: return
-        if self.copy_files(self.save_dir):
+        success, copied_files = self.copy_files(self.save_dir)
+        if success:
+            # 1. History Stack
+            self.history_stack.append({
+                "action": "SAVE",
+                "index": self.current_index,
+                "files": copied_files
+            })
+            
             print(f"SAVED: {os.path.basename(self.image_list[self.current_index])}")
             self.current_index += 1
             self.count_save += 1
@@ -379,7 +397,15 @@ class DropTool:
 
     def drop_current(self):
         if not self.drop_dir: return
-        if self.copy_files(self.drop_dir):
+        success, copied_files = self.copy_files(self.drop_dir)
+        if success:
+            # 1. History Stack
+            self.history_stack.append({
+                "action": "DROP",
+                "index": self.current_index,
+                "files": copied_files
+            })
+            
             print(f"DROPPED: {os.path.basename(self.image_list[self.current_index])}")
             self.current_index += 1
             self.count_drop += 1
@@ -388,61 +414,36 @@ class DropTool:
             self.load_image()
 
     def undo(self):
-        if self.current_index <= 0:
-            messagebox.showinfo("First Image", "This is the first image.")
+        if not self.history_stack:
+            messagebox.showinfo("Undo", "No history to undo.")
             return
 
-        # 1. Move back
-        self.current_index -= 1
+        # Pop last action
+        last_action = self.history_stack.pop()
+        action_type = last_action["action"]
+        prev_index = last_action["index"]
+        files_to_remove = last_action["files"]
         
-        # 2. Identify and delete the copied file from _save OR _drop
-        img_path = self.image_list[self.current_index]
-        basename = os.path.basename(img_path)
-        base_name_no_ext = os.path.splitext(basename)[0]
-        
-        # Possible paths
-        save_img = os.path.join(self.save_dir, basename)
-        save_json = os.path.join(self.save_dir, base_name_no_ext + ".json")
-        
-        drop_img = os.path.join(self.drop_dir, basename)
-        drop_json = os.path.join(self.drop_dir, base_name_no_ext + ".json")
-        
-        deleted_log = []
-        
-        was_saved = False
-        was_dropped = False
-        
-        try:
-            if os.path.exists(save_img):
-                os.remove(save_img)
-                deleted_log.append("SAVE_IMG")
-                was_saved = True
-            if os.path.exists(save_json):
-                os.remove(save_json)
-                deleted_log.append("SAVE_JSON")
-                
-            if os.path.exists(drop_img):
-                os.remove(drop_img)
-                deleted_log.append("DROP_IMG")
-                was_dropped = True
-            if os.path.exists(drop_json):
-                os.remove(drop_json)
-                deleted_log.append("DROP_JSON")
-                
-            print(f"Undo complete for {basename}: {', '.join(deleted_log)}")
+        # 1. Remove files
+        for fpath in files_to_remove:
+            if os.path.exists(fpath):
+                try:
+                    os.remove(fpath)
+                    print(f"Undo deleted: {fpath}")
+                except Exception as e:
+                    print(f"Undo failed to delete {fpath}: {e}")
+
+        # 2. Revert Stats
+        if action_type == "SAVE":
+            self.count_save = max(0, self.count_save - 1)
+        elif action_type == "DROP":
+            self.count_drop = max(0, self.count_drop - 1)
             
-            # Decrement Logic
-            if was_saved:
-                self.count_save = max(0, self.count_save - 1)
-            elif was_dropped:
-                self.count_drop = max(0, self.count_drop - 1)
-            
-        except Exception as e:
-            messagebox.showerror("Error", f"Undo failed to delete files: {e}")
-            
-        # 3. Reload
+        # 3. Revert Index & Reload
+        self.current_index = prev_index
         self.save_progress_file()
         self.load_image()
+
 
 if __name__ == "__main__":
     root = tk.Tk()
