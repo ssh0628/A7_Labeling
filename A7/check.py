@@ -341,7 +341,7 @@ class VerifyTool:
                             if "polygon" in item:
                                 p = parse_poly(item["polygon"])
                                 if p:
-                                    draw_poly_shape(p, "blue", 1, f"Org:{lbl}")
+                                    draw_poly_shape(p, "red", 1, f"Org:{lbl}")
                                     c_p+=1
                         print(f"[DEBUG] Drawn Orig (Blue) -> Box:{c_b}, Poly:{c_p}")
                 except Exception as e:
